@@ -12,29 +12,17 @@ The primary goal is to reduce manual coordination while maintaining transparency
 
 ## Current Phase
 
-**Phase 9 — Matching Engine: COMPLETE**
+**All phases COMPLETE (Phase 0 through Phase 14).**
 
-Phase 0 through Phase 8 are also COMPLETE.
+The MVP is feature-complete and deployment-ready. The full donation →
+requirement → matching → approval → transaction workflow is implemented and
+tested, along with search/filtering, global exception handling, OpenAPI/Swagger
+documentation, and demo/production preparation (admin seeding, CORS, health
+endpoint, Render deployment config).
 
-Phase 7 (Donation & Requirement Business Logic) is COMPLETE: donor/receiver
-create, own-list, read, update and admin approve/reject endpoints are
-implemented and tested (see `DonationLifecycleIntegrationTest`).
-
-Phase 8 (Search & Filtering) is COMPLETE: approved donation/requirement
-discovery with category/city/text filters, pagination, sorting and
-role-based access (see "Phase 8 Build Record" below).
-
-Phase 9 (Matching Engine) is COMPLETE: rule-based scoring, hard gates,
-suggestions capped at 5 per requirement, Admin-only suggestion endpoints
-and the admin match review queue (see "Phase 9 Build Record" below).
-
-Phase 10 (Admin Match Approval & Transactions) is the next implementation
-phase.
-
-Registration, login, BCrypt password hashing, JWT authentication, role-based
-authorization (`@PreAuthorize`) and service-layer ownership checks are
-implemented and tested. No match-approval or transaction business logic
-exists yet.
+Remaining work is future/maintenance phases (see the roadmap and revisit
+points throughout this document). Do not start a new implementation phase
+without an explicit instruction.
 
 ---
 
@@ -575,22 +563,22 @@ the Current Phase section; no separate build record was written for it.
 COMPLETE. Approved donation/requirement discovery. See "Phase 8 Build Record" below.
 
 ## Phase 9 — Matching Engine
-Rule-based scoring and match suggestions. NEXT.
+Rule-based scoring and match suggestions. COMPLETE.
 
 ## Phase 10 — Admin Match Approval & Transactions
-Match approval and fulfilment/completion workflow.
+Match approval and fulfilment/completion workflow. COMPLETE.
 
 ## Phase 11 — Global Exception Handling
-Standard API error responses.
+Standard API error responses. COMPLETE.
 
 ## Phase 12 — Testing & Security Review
-Integration tests, authorization tests, edge cases and production review.
+Integration tests, authorization tests, edge cases and production review. COMPLETE.
 
 ## Phase 13 — OpenAPI/Swagger
-Complete API documentation.
+Complete API documentation. COMPLETE.
 
 ## Phase 14 — Demo & Production Preparation
-Deployment/readiness checks and hackathon demo flow.
+Deployment/readiness checks and hackathon demo flow. COMPLETE.
 
 ---
 
@@ -1536,6 +1524,161 @@ New `SearchIntegrationTest` (32 tests) covers:
 6. The `lower(city)` / `lower(title/description)` predicates cannot use the
    Phase 2 plain btree indexes. Revisit with an expression index or
    full-text search if discovery volume grows.
+
+---
+
+# Phase 13 Build Record — OpenAPI / Swagger
+
+Completed 2026-08-10. Live API documentation via springdoc-openapi. No
+business logic was added.
+
+## Dependencies added (pom.xml)
+
+- `org.springdoc:springdoc-openapi-starter-webmvc-ui` version `3.1.0`
+  (managed via the `springdoc.version` property). 3.1.0 is the release line
+  that supports Spring Boot 4.1 + Jackson 3.
+
+## What was added
+
+- `config/OpenApiConfig` — `OpenAPI` bean with API title/description/version,
+  contact and license, plus a global HTTP `bearerAuth` JWT security scheme so
+  Swagger UI's **Authorize** button works. No `@Tag`/`@Operation` annotations
+  were added; springdoc derives the schema from the controllers/DTOs.
+- `security/SecurityConfig` — permits the documentation routes
+  (`/v3/api-docs/**`, `/swagger-ui/**`, `/swagger-ui.html`,
+  `/swagger-resources/**`) without authentication.
+
+## Endpoints
+
+- `GET /v3/api-docs` — live OpenAPI JSON (public).
+- `GET /swagger-ui/index.html` (and `/swagger-ui.html`) — interactive UI
+  (public).
+
+## Jackson 2/3 verification
+
+The project uses Jackson 3 (`tools.jackson`, managed by Spring Boot 4) while
+jjwt-jackson pulls Jackson 2 (`com.fasterxml`) onto the classpath. Known
+springdoc+Jackson 2/3 conflict reports (e.g. springdoc issue #3157/#3200) were
+verified empirically: springdoc 3.1.0 starts cleanly, generates the full spec
+including the Phase 10 endpoints, and serves Swagger UI without the
+PolymorphicModelConverter exception. No `spring-boot-jackson2` shim was needed.
+This was confirmed by the tests below.
+
+## Tests executed and result
+
+`JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home ./mvnw clean test`
+
+Result: BUILD SUCCESS — 236 tests, 0 failures, 0 errors.
+
+New `OpenApiIntegrationTest` (3 tests): `GET /v3/api-docs` returns the
+expected title and contains the auth, admin match-approval and admin
+transaction-completion paths plus the `bearerAuth` security scheme; Swagger UI
+is served; the docs are public without a token. All Phase 1–12 tests still
+pass.
+
+## Files created
+
+- `config/OpenApiConfig.java`
+- `test/OpenApiIntegrationTest.java`
+
+## Files modified
+
+- `pom.xml` — springdoc dependency + `springdoc.version` property.
+- `security/SecurityConfig.java` — permit the documentation routes.
+- `AGENTS.md` — this record.
+
+---
+
+# Phase 14 Build Record — Demo & Production Preparation
+
+Completed 2026-08-10. Deployment-readiness and hackathon demo support. No
+business logic was added.
+
+## What was added
+
+### Admin seeding (`config/AdminSeeder`)
+
+- `CommandLineRunner` that creates an ADMIN account on startup when BOTH
+  `ADMIN_EMAIL` and `ADMIN_PASSWORD` are set and no user with that email
+  exists. Email is trimmed/lowercased; password is BCrypt-hashed with the
+  application encoder; account name is "Administrator"; role ADMIN, active.
+- Fail-fast guardrails: setting only one of the two variables, or a password
+  shorter than 8 characters, throws `IllegalStateException` at startup so a
+  misconfigured deployment never silently runs without an admin.
+- Skipped entirely (no DB writes) when neither variable is set, which is the
+  default.
+
+### Restricted CORS (`config/CorsConfig`)
+
+- `WebMvcConfigurer` driven by `CORS_ALLOWED_ORIGINS` (comma-separated list).
+  When set, `/api/**` allows only those origins (GET/POST/PATCH/DELETE/OPTIONS,
+  `Authorization`/`Content-Type` headers, credentials allowed). When unset,
+  no CORS headers are emitted at all, so browser cross-origin callers are
+  blocked by default (preflight → 403).
+- `SecurityConfig` adds `.cors(Customizer.withDefaults())` so Spring Security
+  honors the MVC CORS config for preflight requests before authorization.
+
+### Health endpoint (`controller/HealthController`)
+
+- `GET /api/health` — public; runs `SELECT 1` against the database. Returns
+  200 `{"status":"UP","database":"UP"}` or 503 `DOWN` when the DB is
+  unreachable. Used by Render's `healthCheckPath`.
+
+### Deployment config
+
+- `render.yaml` — added `healthCheckPath: /api/health` and (sync:false)
+  `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `CORS_ALLOWED_ORIGINS` variables to be
+  filled in from the Render dashboard.
+- `.env.example` — documented the new variables.
+- `README.md` — features, env-var table, API overview (health + docs), phase
+  table (0–14 complete) and deployment steps updated.
+
+## Environment variables (new)
+
+- `ADMIN_EMAIL` / `ADMIN_PASSWORD` — both-or-neither; seeds an admin on boot.
+- `CORS_ALLOWED_ORIGINS` — comma-separated allowed origins for `/api/**`.
+
+## Tests executed and result
+
+`JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home ./mvnw clean test`
+
+Result: BUILD SUCCESS — 245 tests, 0 failures, 0 errors.
+
+New tests:
+- `config/AdminSeederTest` (6, unit/Mockito) — seeds with correct email
+  normalization/role/hash; skips when credentials absent; skips when the
+  admin already exists; fails fast for email-without-password,
+  password-without-email and password < 8 chars.
+- `CorsIntegrationTest` (2) — preflight from an allowed origin returns 200
+  with `Access-Control-Allow-Origin`; preflight from a disallowed origin is
+  403.
+- `HealthEndpointTest` (1) — `GET /api/health` is public and reports
+  UP/UP.
+- All Phase 1–13 tests still pass.
+
+## Files created
+
+- `config/AdminSeeder.java`
+- `config/CorsConfig.java`
+- `controller/HealthController.java`
+- tests: `config/AdminSeederTest.java`, `CorsIntegrationTest.java`,
+  `HealthEndpointTest.java`
+
+## Files modified
+
+- `security/SecurityConfig.java` — `.cors(withDefaults())`, public
+  `/api/health`.
+- `src/main/resources/application.properties` — `admin.email`,
+  `admin.password`, `cors.allowed-origins`.
+- `render.yaml`, `.env.example`, `README.md`, `AGENTS.md`.
+
+## Documentation debt (from the interrupted Phase 9–12 session)
+
+AGENTS.md has no build records for Phase 9 (Matching Engine), Phase 10 (Admin
+Match Approval & Transactions), Phase 11 (Global Exception Handling) or Phase
+12 (Testing & Security Review), even though the current-phase section now
+declares them complete and Phase 13's test run confirms 236 tests were already
+passing. Backfill these records from the actual code before the next phase.
 
 ---
 

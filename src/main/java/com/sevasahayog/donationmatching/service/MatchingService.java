@@ -10,11 +10,16 @@ import com.sevasahayog.donationmatching.entity.Match;
 import com.sevasahayog.donationmatching.entity.MatchStatus;
 import com.sevasahayog.donationmatching.entity.Requirement;
 import com.sevasahayog.donationmatching.entity.RequirementStatus;
+import com.sevasahayog.donationmatching.entity.User;
+import com.sevasahayog.donationmatching.exception.InvalidOperationException;
+import com.sevasahayog.donationmatching.exception.InvalidStatusTransitionException;
+import com.sevasahayog.donationmatching.exception.MatchNotFoundException;
 import com.sevasahayog.donationmatching.exception.RequirementNotFoundException;
 import com.sevasahayog.donationmatching.matching.MatchScorer;
 import com.sevasahayog.donationmatching.repository.DonationRepository;
 import com.sevasahayog.donationmatching.repository.MatchRepository;
 import com.sevasahayog.donationmatching.repository.RequirementRepository;
+import com.sevasahayog.donationmatching.repository.UserRepository;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -24,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -40,18 +46,27 @@ public class MatchingService {
     private final DonationRepository donationRepository;
     private final RequirementRepository requirementRepository;
     private final MatchRepository matchRepository;
+    private final UserRepository userRepository;
     private final MatchScorer matchScorer;
+    private final TransactionService transactionService;
+    private final AuditService auditService;
     private final TransactionTemplate requiresNewTransaction;
 
     public MatchingService(DonationRepository donationRepository,
                            RequirementRepository requirementRepository,
                            MatchRepository matchRepository,
+                           UserRepository userRepository,
                            MatchScorer matchScorer,
+                           TransactionService transactionService,
+                           AuditService auditService,
                            PlatformTransactionManager transactionManager) {
         this.donationRepository = donationRepository;
         this.requirementRepository = requirementRepository;
         this.matchRepository = matchRepository;
+        this.userRepository = userRepository;
         this.matchScorer = matchScorer;
+        this.transactionService = transactionService;
+        this.auditService = auditService;
         this.requiresNewTransaction = new TransactionTemplate(transactionManager);
         this.requiresNewTransaction.setPropagationBehavior(
                 TransactionTemplate.PROPAGATION_REQUIRES_NEW);
@@ -88,6 +103,59 @@ public class MatchingService {
             return matchRepository.findAll(pageable).map(MatchResponse::from);
         }
         return matchRepository.findAllByStatus(status, pageable).map(MatchResponse::from);
+    }
+
+    @Transactional
+    public MatchResponse approve(Long adminId, Long matchId) {
+        Match match = findMatch(matchId);
+        if (match.getStatus() != MatchStatus.SUGGESTED) {
+            throw new InvalidStatusTransitionException(
+                    "Match cannot transition from " + match.getStatus() + " to APPROVED");
+        }
+        Donation donation = match.getDonation();
+        if (donation.getStatus() != DonationStatus.APPROVED) {
+            throw new InvalidOperationException(
+                    "Donation " + donation.getId() + " is no longer available for matching");
+        }
+        Requirement requirement = match.getRequirement();
+        if (requirement.getStatus() != RequirementStatus.APPROVED) {
+            throw new InvalidOperationException(
+                    "Requirement " + requirement.getId() + " is no longer available for matching");
+        }
+        match.setStatus(MatchStatus.APPROVED);
+        match.setReviewedAt(Instant.now());
+        match.setReviewedBy(findAdmin(adminId));
+        donation.setStatus(DonationStatus.MATCHED);
+        transactionService.createForMatch(match);
+        auditService.record(adminId, "MATCH_APPROVED", "Match",
+                String.valueOf(matchId),
+                "Match " + matchId + " approved; transaction created");
+        return MatchResponse.from(match);
+    }
+
+    @Transactional
+    public MatchResponse reject(Long adminId, Long matchId) {
+        Match match = findMatch(matchId);
+        if (match.getStatus() != MatchStatus.SUGGESTED) {
+            throw new InvalidStatusTransitionException(
+                    "Match cannot transition from " + match.getStatus() + " to REJECTED");
+        }
+        match.setStatus(MatchStatus.REJECTED);
+        match.setReviewedAt(Instant.now());
+        match.setReviewedBy(findAdmin(adminId));
+        auditService.record(adminId, "MATCH_REJECTED", "Match",
+                String.valueOf(matchId),
+                "Match " + matchId + " rejected");
+        return MatchResponse.from(match);
+    }
+
+    private Match findMatch(Long matchId) {
+        return matchRepository.findById(matchId)
+                .orElseThrow(() -> new MatchNotFoundException("Match not found"));
+    }
+
+    private User findAdmin(Long adminId) {
+        return userRepository.findById(adminId).orElse(null);
     }
 
     private List<MatchSuggestionResponse> suggestFor(Requirement requirement) {

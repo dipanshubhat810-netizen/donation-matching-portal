@@ -1,0 +1,1227 @@
+openapi: 3.0.0
+info:
+  title: Donation Matching Portal API (Seva Sahayog Foundation)
+  version: 1.0.0
+  description: |
+    REST API for the Seva Sahayog donation matching portal.
+
+    Roles: DONOR, RECEIVER, ADMIN.
+    All endpoints except /api/auth/* require a JWT bearer token.
+    Authorization is enforced server-side via @PreAuthorize and ownership checks.
+
+servers:
+  - url: /
+
+tags:
+  - name: Authentication
+    description: Register, login and current-user information
+  - name: Donations
+    description: Donor donation lifecycle and discovery
+  - name: Requirements
+    description: Receiver requirement lifecycle and discovery
+  - name: Administration
+    description: Admin review queues and match management
+
+paths:
+  /api/auth/register:
+    post:
+      tags: [Authentication]
+      summary: Create a donor account
+      description: Always creates role DONOR. Any client-supplied role is ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRegisterRequest'
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Log in with email and password
+      description: Email normalization is case-insensitive (lowercased/trimmed).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Invalid credentials or inactive account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/me:
+    get:
+      tags: [Authentication]
+      summary: View the current user's profile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/donations:
+    post:
+      tags: [Donations]
+      summary: Create a donation
+      description: DONOR only. Creates donation with status SUBMITTED.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DonationRequest'
+      responses:
+        '201':
+          description: Donation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DonationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    get:
+      tags: [Donations]
+      summary: Search approved donations (discovery)
+      description: |
+        RECEIVER sees only APPROVED donations and may NOT pass a status filter (400).
+        ADMIN sees all statuses and may filter by status.
+        DONOR is forbidden.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/Category'
+        - name: city
+          in: query
+          required: false
+          description: Case-insensitive equality on city.
+          schema:
+            type: string
+        - name: query
+          in: query
+          required: false
+          description: Free text over title or description, case-insensitive substring. Max 200 chars.
+          schema:
+            type: string
+            maxLength: 200
+        - name: status
+          in: query
+          required: false
+          description: ADMIN only. Rejected with 400 for non-admin roles.
+          schema:
+            $ref: '#/components/schemas/DonationStatus'
+        - name: page
+          in: query
+          required: false
+          description: Zero-based page number.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          required: false
+          description: Page size, clamped to max 100.
+          schema:
+            type: integer
+            minimum: 1
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: Whitelisted to createdAt (e.g. createdAt,desc). Any other value returns 400.
+          schema:
+            type: string
+            default: createdAt,desc
+      responses:
+        '200':
+          description: Paged results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DonationPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/donations/my:
+    get:
+      tags: [Donations]
+      summary: List the logged-in donor's own donations
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 20
+      responses:
+        '200':
+          description: Paged own donations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DonationPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/donations/{id}:
+    get:
+      tags: [Donations]
+      summary: View a single donation
+      description: DONOR or ADMIN. DONOR must own the donation (403 otherwise).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Donation details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DonationResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Not found or not owned by caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags: [Donations]
+      summary: Update an own donation (partial)
+      description: DONOR only, owner required. Returns 204 with no body.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DonationUpdateRequest'
+      responses:
+        '204':
+          description: Updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Not found or not owned by caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/donations/{id}/status:
+    patch:
+      tags: [Donations]
+      summary: Admin approve/reject a donation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DonationStatusUpdateRequest'
+      responses:
+        '200':
+          description: Updated donation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DonationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/requirements:
+    post:
+      tags: [Requirements]
+      summary: Create a requirement
+      description: RECEIVER only. Creates requirement with status SUBMITTED.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequirementRequest'
+      responses:
+        '201':
+          description: Requirement created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    get:
+      tags: [Requirements]
+      summary: Search approved requirements (discovery)
+      description: |
+        DONOR sees only APPROVED requirements and may NOT pass a status filter (400).
+        ADMIN sees all statuses and may filter by status.
+        RECEIVER is forbidden.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/Category'
+        - name: city
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: query
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+        - name: status
+          in: query
+          required: false
+          description: ADMIN only. Rejected with 400 for non-admin roles.
+          schema:
+            $ref: '#/components/schemas/RequirementStatus'
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: Whitelisted to createdAt.
+          schema:
+            type: string
+            default: createdAt,desc
+      responses:
+        '200':
+          description: Paged results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/requirements/my:
+    get:
+      tags: [Requirements]
+      summary: List the logged-in receiver's own requirements
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 20
+      responses:
+        '200':
+          description: Paged own requirements
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/requirements/{id}:
+    get:
+      tags: [Requirements]
+      summary: View a single requirement
+      description: RECEIVER or ADMIN. RECEIVER must own the requirement (403 otherwise).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Requirement details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Not found or not owned by caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags: [Requirements]
+      summary: Update an own requirement (partial)
+      description: RECEIVER only, owner required. Returns 204 with no body.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequirementUpdateRequest'
+      responses:
+        '204':
+          description: Updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Not found or not owned by caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/requirements/{id}/status:
+    patch:
+      tags: [Requirements]
+      summary: Admin approve/reject a requirement
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequirementStatusUpdateRequest'
+      responses:
+        '200':
+          description: Updated requirement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/admin/queue:
+    get:
+      tags: [Administration]
+      summary: Admin review queue placeholder
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Placeholder response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/admin/matches/suggest:
+    post:
+      tags: [Administration]
+      summary: Generate match suggestions
+      description: |
+        With requirementId: returns the top suggestions for that requirement.
+        Without requirementId: evaluates all APPROVED requirements and returns a summary.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: requirementId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Suggestions or generation summary
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/MatchSuggestionResponse'
+                  - $ref: '#/components/schemas/MatchGenerationSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Requirement not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/admin/matches:
+    get:
+      tags: [Administration]
+      summary: List matches (admin review queue)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/MatchStatus'
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: Whitelisted to createdAt.
+          schema:
+            type: string
+            default: createdAt,desc
+      responses:
+        '200':
+          description: Paged matches
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: Missing, malformed, expired or invalid JWT
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Role not permitted or resource not owned
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    BadRequest:
+      description: Validation failed or malformed request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    # ---------- Enums ----------
+    Role:
+      type: string
+      enum: [DONOR, RECEIVER, ADMIN]
+    Category:
+      type: string
+      enum: [FOOD, CLOTHING, EDUCATION, MEDICAL, FURNITURE, ELECTRONICS, HOUSEHOLD, HYGIENE, OTHER]
+    QuantityUnit:
+      type: string
+      enum: [PIECES, KG, LITRES, BAGS, BOXES, PACKETS, SETS]
+    Condition:
+      type: string
+      enum: [NEW, GOOD, FAIR, USED]
+    Urgency:
+      type: string
+      enum: [LOW, MEDIUM, HIGH]
+    DonationStatus:
+      type: string
+      enum: [SUBMITTED, APPROVED, MATCHED, IN_FULFILMENT, COMPLETED, REJECTED, CANCELLED]
+    RequirementStatus:
+      type: string
+      enum: [SUBMITTED, APPROVED, FULFILLED, REJECTED, CANCELLED]
+    MatchStatus:
+      type: string
+      enum: [SUGGESTED, APPROVED, IN_FULFILMENT, COMPLETED, REJECTED, CANCELLED]
+    TransactionStatus:
+      type: string
+      enum: [PENDING, IN_PROGRESS, COMPLETED, CANCELLED]
+
+    # ---------- Requests ----------
+    UserRegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        password:
+          type: string
+          format: password
+
+    DonationRequest:
+      type: object
+      required: [title, description, category, quantity, quantityUnit, condition, city]
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 2000
+        category:
+          $ref: '#/components/schemas/Category'
+        quantity:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+          description: At most 9 integer digits and 3 decimal places.
+        quantityUnit:
+          $ref: '#/components/schemas/QuantityUnit'
+        condition:
+          $ref: '#/components/schemas/Condition'
+        city:
+          type: string
+          maxLength: 100
+        locality:
+          type: string
+          maxLength: 100
+        pincode:
+          type: string
+          maxLength: 20
+
+    DonationUpdateRequest:
+      description: Partial update; all fields optional. Server-controlled fields are ignored.
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 2000
+        category:
+          $ref: '#/components/schemas/Category'
+        quantity:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+        quantityUnit:
+          $ref: '#/components/schemas/QuantityUnit'
+        condition:
+          $ref: '#/components/schemas/Condition'
+        city:
+          type: string
+          maxLength: 100
+        locality:
+          type: string
+          maxLength: 100
+        pincode:
+          type: string
+          maxLength: 20
+
+    DonationStatusUpdateRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/DonationStatus'
+
+    RequirementRequest:
+      type: object
+      required: [title, description, category, quantity, quantityUnit, city, urgency]
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 2000
+        category:
+          $ref: '#/components/schemas/Category'
+        quantity:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+          description: At most 9 integer digits and 3 decimal places.
+        quantityUnit:
+          $ref: '#/components/schemas/QuantityUnit'
+        city:
+          type: string
+          maxLength: 100
+        locality:
+          type: string
+          maxLength: 100
+        pincode:
+          type: string
+          maxLength: 20
+        urgency:
+          $ref: '#/components/schemas/Urgency'
+
+    RequirementUpdateRequest:
+      description: Partial update; all fields optional. Server-controlled fields are ignored.
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 2000
+        category:
+          $ref: '#/components/schemas/Category'
+        quantity:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+        quantityUnit:
+          $ref: '#/components/schemas/QuantityUnit'
+        city:
+          type: string
+          maxLength: 100
+        locality:
+          type: string
+          maxLength: 100
+        pincode:
+          type: string
+          maxLength: 20
+        urgency:
+          $ref: '#/components/schemas/Urgency'
+
+    RequirementStatusUpdateRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/RequirementStatus'
+
+    # ---------- Responses ----------
+    AuthResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        tokenType:
+          type: string
+          example: Bearer
+        expiresIn:
+          type: integer
+          format: int64
+          description: Token lifetime in milliseconds.
+        userId:
+          type: integer
+          format: int64
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/Role'
+
+    CurrentUserResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/Role'
+
+    UserSummaryResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+
+    DonationPhotoResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        storageKey:
+          type: string
+        originalFilename:
+          type: string
+        contentType:
+          type: string
+        fileSize:
+          type: integer
+          format: int64
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    DonationSummaryResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        city:
+          type: string
+        status:
+          $ref: '#/components/schemas/DonationStatus'
+
+    DonationResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          $ref: '#/components/schemas/Category'
+        quantity:
+          type: number
+          format: double
+        quantityUnit:
+          $ref: '#/components/schemas/QuantityUnit'
+        condition:
+          $ref: '#/components/schemas/Condition'
+        city:
+          type: string
+        locality:
+          type: string
+          nullable: true
+        pincode:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/DonationStatus'
+        donor:
+          $ref: '#/components/schemas/UserSummaryResponse'
+        photos:
+          type: array
+          items:
+            $ref: '#/components/schemas/DonationPhotoResponse'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    RequirementSummaryResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        city:
+          type: string
+        status:
+          $ref: '#/components/schemas/RequirementStatus'
+
+    RequirementResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          $ref: '#/components/schemas/Category'
+        quantity:
+          type: number
+          format: double
+        quantityUnit:
+          $ref: '#/components/schemas/QuantityUnit'
+        city:
+          type: string
+        locality:
+          type: string
+          nullable: true
+        pincode:
+          type: string
+          nullable: true
+        urgency:
+          $ref: '#/components/schemas/Urgency'
+        status:
+          $ref: '#/components/schemas/RequirementStatus'
+        receiver:
+          $ref: '#/components/schemas/UserSummaryResponse'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    MatchScoreBreakdown:
+      type: object
+      properties:
+        categoryScore:
+          type: number
+          format: double
+        quantityScore:
+          type: number
+          format: double
+        locationScore:
+          type: number
+          format: double
+        urgencyScore:
+          type: number
+          format: double
+        totalScore:
+          type: number
+          format: double
+
+    MatchSuggestionResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        donation:
+          $ref: '#/components/schemas/DonationSummaryResponse'
+        requirement:
+          $ref: '#/components/schemas/RequirementSummaryResponse'
+        score:
+          type: number
+          format: double
+        status:
+          $ref: '#/components/schemas/MatchStatus'
+        breakdown:
+          $ref: '#/components/schemas/MatchScoreBreakdown'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    MatchResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        donation:
+          $ref: '#/components/schemas/DonationSummaryResponse'
+        requirement:
+          $ref: '#/components/schemas/RequirementSummaryResponse'
+        score:
+          type: number
+          format: double
+        status:
+          $ref: '#/components/schemas/MatchStatus'
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewedBy:
+          $ref: '#/components/schemas/UserSummaryResponse'
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    MatchGenerationSummary:
+      type: object
+      properties:
+        requirementsEvaluated:
+          type: integer
+          format: int32
+        suggestionsCreated:
+          type: integer
+          format: int32
+
+    ErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          format: int32
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+
+    # ---------- Pagination (Spring Data Page JSON shape) ----------
+    Page:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            type: object
+        pageable:
+          type: object
+          properties:
+            pageNumber:
+              type: integer
+              format: int32
+            pageSize:
+              type: integer
+              format: int32
+            sort:
+              $ref: '#/components/schemas/Sort'
+            offset:
+              type: integer
+              format: int64
+            paged:
+              type: boolean
+            unpaged:
+              type: boolean
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+        last:
+          type: boolean
+        size:
+          type: integer
+          format: int32
+        number:
+          type: integer
+          format: int32
+        sort:
+          $ref: '#/components/schemas/Sort'
+        first:
+          type: boolean
+        numberOfElements:
+          type: integer
+          format: int32
+        empty:
+          type: boolean
+
+    Sort:
+      type: object
+      properties:
+        empty:
+          type: boolean
+        unsorted:
+          type: boolean
+        sorted:
+          type: boolean
+
+    DonationPage:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          properties:
+            content:
+              type: array
+              items:
+                $ref: '#/components/schemas/DonationResponse'
+
+    RequirementPage:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          properties:
+            content:
+              type: array
+              items:
+                $ref: '#/components/schemas/RequirementResponse'
+
+    MatchPage:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          properties:
+            content:
+              type: array
+              items:
+                $ref: '#/components/schemas/MatchResponse'

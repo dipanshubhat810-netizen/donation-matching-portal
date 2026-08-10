@@ -155,11 +155,11 @@ The suite covers authentication, role authorization, ownership, donation lifecyc
 Deployment is configured via `render.yaml` (Render Blueprint) and `Dockerfile`:
 1. Push the repository to GitHub
 2. In Render: **New → Blueprint** → connect your GitHub repo
-3. Render provisions a web service + free PostgreSQL, injecting `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` and a generated `JWT_SECRET`
+3. Render provisions a web service + free PostgreSQL, injecting `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD` and a generated `JWT_SECRET`
 4. Set `ADMIN_EMAIL` / `ADMIN_PASSWORD` (seeds an admin account on first boot) and `CORS_ALLOWED_ORIGINS` (frontend origin) in the Render dashboard
 5. First deploy runs the Docker multi-stage build (Maven → JRE image); Render polls `GET /api/health` for readiness
 
-A custom `EnvironmentPostProcessor` converts Render's `postgres://` connection string to the `jdbc:postgresql://` format the JDBC driver requires. The app binds to Render's injected `PORT`.
+The JDBC URL is composed in `application.properties` from `DB_HOST`/`DB_PORT`/`DB_NAME` (or an explicit `DB_URL`, which wins). The app binds to Render's injected `PORT`.
 
 ## Demo
 

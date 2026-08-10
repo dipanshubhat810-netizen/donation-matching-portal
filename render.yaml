@@ -6,10 +6,26 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     envVars:
-      - key: DB_URL
+      - key: DB_HOST
         fromDatabase:
           name: donation-matching-db
-          property: connectionString
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: donation-matching-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: donation-matching-db
+          property: database
+      - key: DB_USERNAME
+        fromDatabase:
+          name: donation-matching-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: donation-matching-db
+          property: password
       - key: DB_USERNAME
         fromDatabase:
           name: donation-matching-db

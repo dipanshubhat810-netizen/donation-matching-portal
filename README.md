@@ -153,7 +153,6 @@ The suite covers authentication, role authorization, ownership, donation lifecyc
 ## Deployment
 
 Deployment is configured via `render.yaml` (Render Blueprint) and `Dockerfile`:
-
 1. Push the repository to GitHub
 2. In Render: **New → Blueprint** → connect your GitHub repo
 3. Render provisions a web service + free PostgreSQL, injecting `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` and a generated `JWT_SECRET`
@@ -161,6 +160,11 @@ Deployment is configured via `render.yaml` (Render Blueprint) and `Dockerfile`:
 5. First deploy runs the Docker multi-stage build (Maven → JRE image); Render polls `GET /api/health` for readiness
 
 A custom `EnvironmentPostProcessor` converts Render's `postgres://` connection string to the `jdbc:postgresql://` format the JDBC driver requires. The app binds to Render's injected `PORT`.
+
+## Demo
+
+A step-by-step hackathon runbook (seed data, exact `curl` calls, expected
+outputs) lives in [`docs/demo-walkthrough.md`](docs/demo-walkthrough.md).
 
 ## License
 

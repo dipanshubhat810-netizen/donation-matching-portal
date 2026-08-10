@@ -1672,6 +1672,21 @@ New tests:
   `admin.password`, `cors.allowed-origins`.
 - `render.yaml`, `.env.example`, `README.md`, `AGENTS.md`.
 
+## Post-phase deploy fix (2026-08-10)
+
+The first Render deploy failed with `'url' must start with "jdbc"`. Root
+cause: Spring Boot 4.1 repackages `META-INF/spring/*.EnvironmentPostProcessor`
+registration files to the jar ROOT (not `BOOT-INF/classes/`), where the app
+classloader cannot see them, so the `postgres://` → `jdbc:` URL conversion in
+`RenderDataSourceEnvironmentPostProcessor` silently never ran. That class and
+its registration file were REMOVED. The DB URL is now composed in
+`application.properties` from discrete env vars:
+`${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:donation_matching_portal}}`,
+and `render.yaml` pulls `host`/`port`/`database`/`user`/`password` from the
+Render PostgreSQL via `fromDatabase` discrete properties. Do NOT reintroduce an
+`EnvironmentPostProcessor` without verifying its registration survives the
+Spring Boot 4 repackager.
+
 ## Documentation debt (from the interrupted Phase 9–12 session)
 
 AGENTS.md has no build records for Phase 9 (Matching Engine), Phase 10 (Admin

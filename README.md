@@ -75,7 +75,6 @@ psql -d postgres -c "CREATE DATABASE donation_matching_portal"
 
 ```bash
 # 1. Export environment variables (see table below)
-export DB_URL=jdbc:postgresql://localhost:5432/donation_matching_portal
 export DB_USERNAME=dipanshubhat
 export DB_PASSWORD=
 export JWT_SECRET=$(openssl rand -base64 48)
@@ -93,7 +92,10 @@ The API is then available at `http://localhost:8080`.
 
 | Variable           | Required | Default                                                        | Description                        |
 | ------------------ | -------- | -------------------------------------------------------------- | ---------------------------------- |
-| `DB_URL`           | Yes*     | `jdbc:postgresql://localhost:5432/donation_matching_portal`    | PostgreSQL JDBC URL                |
+| `DB_HOST`          | No       | `localhost`                                                    | Database host                      |
+| `DB_PORT`          | No       | `5432`                                                         | Database port                      |
+| `DB_NAME`          | No       | `donation_matching_portal`                                     | Database name                      |
+| `DB_JDBC_URL`      | No       | *(composed from the parts above)*                              | Optional full JDBC URL override    |
 | `DB_USERNAME`      | Yes*     | `dipanshubhat`                                                 | Database user                      |
 | `DB_PASSWORD`      | Yes*     | *(empty — local trust auth)*                                   | Database password                  |
 | `JWT_SECRET`       | Yes      | *(none — startup fails if blank)*              | JWT signing key (≥32 bytes)        |
@@ -159,7 +161,7 @@ Deployment is configured via `render.yaml` (Render Blueprint) and `Dockerfile`:
 4. Set `ADMIN_EMAIL` / `ADMIN_PASSWORD` (seeds an admin account on first boot) and `CORS_ALLOWED_ORIGINS` (frontend origin) in the Render dashboard
 5. First deploy runs the Docker multi-stage build (Maven → JRE image); Render polls `GET /api/health` for readiness
 
-The JDBC URL is composed in `application.properties` from `DB_HOST`/`DB_PORT`/`DB_NAME` (or an explicit `DB_URL`, which wins). The app binds to Render's injected `PORT`.
+The JDBC URL is composed in `application.properties` from `DB_HOST`/`DB_PORT`/`DB_NAME` (or an explicit `DB_JDBC_URL`, which overrides the whole value). `DB_URL` is deliberately ignored — a stale `postgres://` `DB_URL` left on an older deployment can never break startup. The app binds to Render's injected `PORT`.
 
 ## Demo
 

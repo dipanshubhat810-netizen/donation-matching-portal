@@ -1681,11 +1681,27 @@ classloader cannot see them, so the `postgres://` → `jdbc:` URL conversion in
 `RenderDataSourceEnvironmentPostProcessor` silently never ran. That class and
 its registration file were REMOVED. The DB URL is now composed in
 `application.properties` from discrete env vars:
-`${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:donation_matching_portal}}`,
+`${DB_JDBC_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:donation_matching_portal}}`,
 and `render.yaml` pulls `host`/`port`/`database`/`user`/`password` from the
 Render PostgreSQL via `fromDatabase` discrete properties. Do NOT reintroduce an
 `EnvironmentPostProcessor` without verifying its registration survives the
 Spring Boot 4 repackager.
+
+### Second deploy failure — stale DB_URL env var (2026-08-10)
+
+The second deploy ran the fixed code but failed with the same
+`'url' must start with "jdbc"`. Cause: Render keeps env vars that were
+removed from the blueprint, so the service still injected the OLD
+`DB_URL=postgres://…` connection string, and the composition still preferred
+`${DB_URL:…}` over the parts. Fix: the composition no longer references
+`DB_URL` at all. A full-JDBC-URL override is now provided ONLY via the new
+`DB_JDBC_URL` name (impossible for it to be stale on Render). If a
+`postgres://` DB_URL is present in the Render service env it is simply
+ignored. Keep DB_URL out of `application.properties`, `.env.example`, the CI
+workflow, and README. The placeholder default chain is
+`DB_JDBC_URL → DB_HOST/DB_PORT/DB_NAME → localhost:5432/donation_matching_portal`.
+CI relies on the defaults for host/port/name and passes DB_USERNAME/DB_PASSWORD
+explicitly.
 
 ## Documentation debt (from the interrupted Phase 9–12 session)
 

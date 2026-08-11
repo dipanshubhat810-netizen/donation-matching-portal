@@ -26,14 +26,6 @@ services:
         fromDatabase:
           name: donation-matching-db
           property: password
-      - key: DB_USERNAME
-        fromDatabase:
-          name: donation-matching-db
-          property: user
-      - key: DB_PASSWORD
-        fromDatabase:
-          name: donation-matching-db
-          property: password
       - key: JWT_SECRET
         generateValue: true
       - key: ADMIN_EMAIL
